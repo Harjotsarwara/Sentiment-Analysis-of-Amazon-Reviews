@@ -1,0 +1,260 @@
+---
+title: "R Project file"
+author: "Harjot Sarwara"
+date: "3/8/2022"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{
+#loading 0f Raw Dataset
+library(tm)
+library(wordcloud)
+library(SnowballC)
+library(dbplyr)
+library(tidytext)
+library(tidyverse)
+library(syuzhet)
+library(gmodels)
+library(caret)
+library(e1071)
+library(stringr)
+library(ggplot2)
+library(car)
+library(psych)
+library(naivebayes)
+library(qqplotr)
+library(knitr)
+install.packages("rmarkdown")
+library("rmarkdown")
+
+
+
+Amazon_dataset<- read.csv("C:\\Users\\14379\\Downloads\\amazon\\Data_amz.csv",sep = ",",header = T)
+
+#inspecting Dataset
+
+str(Amazon_dataset)
+ID<- Amazon_dataset$ï..id
+View(ID)
+## change the name of i.id col. to ID
+
+names(Amazon_dataset)[1]<- paste("ID")
+
+## Selecting data col. for analysis
+
+selected_dataset<- data.frame(Amazon_dataset$reviews.text,Amazon_dataset$reviews.rating)
+names(selected_dataset)[1]<- paste("Reviews")
+names(selected_dataset)[2]<- paste("Ratings")
+View(selected_dataset)
+class(selected_dataset$Reviews)
+class(selected_dataset$Ratings)
+selected_dataset$Reviews<- as.character(selected_dataset$Reviews)
+
+##1 converting the reviews in corpus
+Text<- selected_dataset$Reviews
+Text.corpus<- Corpus(VectorSource(Text))
+
+
+##2 removing punctuation
+Text.corpus<- tm_map(Text.corpus,removePunctuation)
+
+##3 coverting to lower case
+Text.corpus<- tm_map(Text.corpus,content_transformer(tolower))
+
+##4 stopwords
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "en"))
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "smart"))
+
+
+## removing numbers as numbers do not have any sentiment
+Text.corpus<- tm_map(Text.corpus,removeNumbers)
+
+
+
+## removing the extra whitespace
+Text.corpus<- tm_map(Text.corpus,stripWhitespace)
+dict_corpus<- Text.corpus
+Text.corpus <- tm_map(Text.corpus, stemDocument)
+
+# tokenize the corpus
+myCorpusTokenized <- lapply(Text.corpus, scan_tokenizer)
+
+# stem complete each token vector
+myTokensStemCompleted <- lapply(myCorpusTokenized, stemCompletion, dict_corpus)
+View(myTokensStemCompleted)
+# concatenate tokens by document, create data frame
+my_dataset<- data.frame(Reviews= sapply(myTokensStemCompleted, paste, collapse = " "),Ratings=selected_dataset$Ratings, stringsAsFactors = FALSE)
+
+View(my_dataset)
+## removing the specific words
+
+Text.corpus<- tm_map(Text.corpus,removeWords,c("kindl","amazon"))
+########iconv(Text.data.CHAR,to = "UTF-8")
+
+
+
+##### creating term document matrix
+
+TDM<- TermDocumentMatrix(Text.corpus)
+TDM_MATRIX<- as.matrix(TDM)
+inspect(TDM[1:6,1:5])
+View(TDM_MATRIX)
+
+
+#### sorting the term doc matrix in decreasing order of frequency
+
+dec_freq_sort<- sort(rowSums(TDM_MATRIX),decreasing = T)
+View(dec_freq_sort)
+DF<- data.frame(word=names(dec_freq_sort),freq=dec_freq_sort)
+View(DF)
+### barplot
+TOP_MOST_WORDS<- barplot(DF[1:5,]$freq,las=2,names.arg = DF[1:5,]$word,col = "GREEN")
+
+
+## word cloud
+wordcloud(words = DF$word,freq = DF$freq,min.freq = 500,colors = brewer.pal(8,"Dark2"))
+
+## find association
+findAssocs(TDM,terms = c("great","tablet","love"),corlimit =.125)
+
+## finding the sentiment of orignal doc
+
+syuzhet_vector<- get_sentiment(my_dataset$Reviews,method = "syuzhet")
+
+head(syuzhet_vector)
+summary(syuzhet_vector)
+View(syuzhet_vector)
+syuzhet_sentiment_score<- sign(syuzhet_vector)
+View(syuzhet_sentiment_score)
+syuzhet_sentiment_score<- as.numeric(syuzhet_sentiment_score)
+
+
+##  finding sentiment using affin (-5,5) and bing (-1 to 1)
+
+bing_vector<- get_sentiment(my_dataset$Reviews,method = "bing")
+head(bing_vector)
+summary(bing_vector)
+
+afinn_vector<- get_sentiment(my_dataset$Reviews,method = "afinn")
+head(afinn_vector)
+summary(afinn_vector)
+
+barplot(afinn_vector,border = T)
+barplot(bing_vector)
+barplot(syuzhet_vector)
+
+
+
+### EMOTIONS AND VISUALS
+
+
+emotions<- get_nrc_sentiment(my_dataset$Reviews)
+View(emotions)
+sum_emotions_bycol<- colSums(emotions)
+View(sum_emotions_bycol)
+df_emotions<- data.frame(count=sum_emotions_bycol,emotion=names(sum_emotions_bycol))
+View(df_emotions)
+ggplot(df_emotions,aes(x=reorder(emotion,-count),y=count))+geom_bar(stat = "identity")
+
+
+
+##converting and combining the ratings into negative positive and neutral values
+
+conv_rating<-  str_replace_all(my_dataset$Ratings,c("5"="Positive","4"="Positive","3"="Neutral","2"="Negative","1"="Negative"))
+df_conv1<-cbind(my_dataset$Reviews,my_dataset$Ratings,conv_rating)
+
+
+
+# combining and converting syuzhet vector sentiment in positive, negative and neutral values
+
+conv_sentiment<- str_replace_all(syuzhet_sentiment_score,c("1"="Positive","-1"="Negative","0"="Neutral"))
+View(conv_sentiment)
+head(conv_sentiment_scale,10)
+
+conv_sentiment<- str_replace_all(conv_sentiment,c("-Positive"="Negative"))
+df_conv1<-cbind(my_dataset$Reviews,my_dataset$Ratings,conv_rating,syuzhet_sentiment_score, conv_sentiment)
+View(df_conv1)
+names(df_conv1)[1]<- paste("Reviews")
+names(df_conv1)[2]<-paste("Ratings")
+df_conv1$Reviews<- as.character(df_conv1$Reviews)
+df_conv1$Ratings<- as.integer(df_conv1$Ratings)
+
+
+## conversion to data frame from atomic vector
+df_conv1<- as.data.frame(df_conv1)
+
+##classification and visualization
+
+##confusion matrix
+
+confusionMatrix(df_conv1$conv_rating,reference = df_conv1$conv_sentiment)
+
+## Cross table
+
+C_table<-CrossTable(df_conv1$conv_rating,df_conv1$conv_sentiment,chisq = F)
+
+
+cor(df_conv1$Ratings,df_conv1$syuzhet_sentiment_score)
+
+## naivebayes
+
+NB<-naiveBayes(df_conv1$conv_rating,df_conv1$conv_sentiment)
+NB
+
+
+pairs.panels(df_conv1[,-1])
+pairs(df_conv1[-1])
+
+library(qqplotr)
+
+hist(df_conv1$syuzhet_sentiment_score,labels = T,color="green")
+reg_data<- lm(df_conv1$Ratings~df_conv1$syuzhet_sentiment_score,data = df_conv1)
+View(reg_data)
+plot(predict(reg_data),df_conv1,xlab = "predicted",ylab = "observed")
+
+######naive bayes
+set.seed(236)
+sample_data<- sample(1:nrow(df_conv1),size = .9*nrow(df_conv1))
+
+### defining of train and test data
+
+
+training_data<- df_conv1[sample_data,]
+testing_data<- df_conv1[-sample_data,]
+
+
+label_training<- as.factor(training_data[,5])
+label_testing<- as.factor(testing_data[,5])
+
+model<- naiveBayes(training_data[,1],label_training)
+View(model)
+View(label_training)
+nrow(label_training)
+pred<- predict(model,training_data$conv_sentiment)
+confusionMatrix(label_training,pred)
+
+}
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
