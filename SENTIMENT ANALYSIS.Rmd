@@ -1,0 +1,647 @@
+---
+title: "SENTIMENT ANALYSIS OF AMAZON REVIEWS USING SYUZHET, BING AND AFINN ON NAIVE-BAYES MODEL"
+author: "HARJOT SARWARA"
+date: '2022-03-24'
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+
+```{r}
+
+library(tm)
+library(wordcloud)
+library(SnowballC)
+library(dplyr)
+library(syuzhet)
+library(caret)
+library(e1071)
+library(stringr)
+library(ggplot2)
+library(car)
+library(psych)
+library(corpus)
+library(knitr)
+library(rmarkdown)
+library(gmodels)
+
+```
+
+
+#Loading the dataset from url link: "https://data.world/datafiniti/consumer-reviews-of-amazon-products/workspace/file?filename=Datafiniti_Amazon_Consumer_Reviews_of_Amazon_Products.csv"
+
+```{r}
+
+Amazon_dataset<- read.csv("C:\\Users\\harjo\\Documents\\project\\Data_amz.csv",sep = ",",header = T)
+
+```
+
+#Insepecting the structure of the dataset to check the data types of all the attributes using the "str" command:
+
+```{r}
+
+head(str(Amazon_dataset))
+
+```
+
+# Changing the data type of Reviews.text column from factor to character as it is containing the textual data only.
+
+```{r}
+Amazon_dataset$reviews.text<- as.character(Amazon_dataset$reviews.text)
+class(Amazon_dataset$reviews.text)
+
+```
+
+
+## checking for NA values in the dataset in the Reviews.text column and Rating column
+
+```{r}
+
+which(is.na(Amazon_dataset$reviews.text))
+which(is.na(Amazon_dataset$reviews.rating))
+
+```
+
+# Selecting columns for analysis to elimnate other columns which are not contributing towards the sentiments like ID, dateadded, dateupdated,asins,brand,imageURLS etc, but keeping the Reviews.Ratings and Reviews.texts to start analysing the sentiments hidden in the text of the Reviews.
+
+```{r}
+selected_dataset<- data.frame(Amazon_dataset$reviews.text,Amazon_dataset$reviews.rating)
+names(selected_dataset)[1]<- paste("Reviews")
+names(selected_dataset)[2]<- paste("Ratings")
+View(selected_dataset)
+class(selected_dataset$Reviews)
+class(selected_dataset$Ratings)
+```
+
+#Converting the reviews in corpus to start preprocessing the data which includes removal of numbers,stopwords,whitespace, punctuations,making the font to lower through out and doing the stemming and completing the stemmed words to have the better understanding for extracting the better meaning for Sentiment analysis.
+
+```{r}
+
+selected_dataset$Reviews<- iconv(selected_dataset$Reviews,from = "utf-8", to="ASCII//TRANSLIT")
+selected_dataset$Reviews<- gsub("[^0-9A-Za-z///' ]","" , selected_dataset$Reviews,ignore.case = TRUE)
+gsub("fianc","fiance'",selected_dataset$Reviews, ignore.case = T)
+```
+# Text corpus
+```{r}
+Text.corpus<- Corpus(VectorSource(selected_dataset$Reviews))
+
+```
+
+# Removing punctuation
+```{r}
+Text.corpus<- tm_map(Text.corpus,removePunctuation)
+```
+# Coverting to lower case
+```{r}
+Text.corpus<- tm_map(Text.corpus,content_transformer(tolower))
+```
+# Stopwords
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "en"))
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "smart"))
+```
+
+# Removing the specific words
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeWords,c("kindle","amazon","tablet","echo","alexa","fire","ive","im") )
+```
+
+# Removing numbers as numbers do not have any sentiment
+
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeNumbers)
+```
+
+# Removing the extra whitespace
+```{r}
+Text.corpus<- tm_map(Text.corpus,stripWhitespace)
+
+```
+
+
+# Creating Term Document Matrix
+
+```{r}
+
+TDM<- TermDocumentMatrix(Text.corpus)
+TDM_MATRIX<- as.matrix(TDM)
+View(TDM_MATRIX)
+
+
+```
+
+#sorting the term doc matrix in decreasing order of frequency
+```{r}
+
+dec_freq_sort<- sort(rowSums(TDM_MATRIX),decreasing = T)
+DF<- data.frame(word=names(dec_freq_sort),freq=dec_freq_sort)
+```
+
+# Bag of words and wordcloud of most frequent 50 words
+
+```{r}
+
+bag_of_words<- DF$word[1:100]
+View(as.data.frame(bag_of_words))
+wordcloud(words = DF$word[1:50],freq = DF$freq[1:50],colors = brewer.pal(8,"Dark2"))
+```
+
+
+
+
+
+#Barplot of 5 most frequent words
+```{R}
+TOP_MOST_WORDS<- barplot(DF[1:5,]$freq,las=2,names.arg = DF[1:5,]$word,col = "GREEN")
+
+```
+
+
+## word cloud
+```{r}
+WORDCLOUD<-wordcloud (words = DF$word,freq = DF$freq, min.freq = 100,colors = brewer.pal(8,"Dark2"),random.order = T,max.words = 100)
+
+```
+
+## find association
+```{r}
+findAssocs(TDM,terms = c("great","love","easy","good"),corlimit =.125)
+
+```
+
+# Converting the text.corpus to vector form using sapply function
+
+```{r}
+
+
+selected_dataset$Reviews<- sapply(Text.corpus,paste,collapse="")
+
+
+```
+
+# Extracting sentiments using syuzhet vector from reviews,scale of syuzhet vector 
+
+```{r}
+syuzhet_vector<- get_sentiment(selected_dataset$Reviews,method = "syuzhet")
+
+head(syuzhet_vector)
+summary(syuzhet_vector)
+View(syuzhet_vector)
+
+```
+# signing the standardised values of 1 to each positive value ,-1 to negative value and 0 remains zero
+
+```{r}
+syuzhet_sentiment_score<- sign(syuzhet_vector)
+View(syuzhet_sentiment_score)
+
+df_syuzhet_reviews<- data.frame(Reviews=selected_dataset$Reviews,Sentiment_Score=syuzhet_sentiment_score)
+```
+
+# Visuals for syuzhet vector
+
+```{r}
+plot(
+  syuzhet_vector[1:50], 
+  type="h", 
+  main="syuzhet vector Plot Trajectory", 
+  xlab = "Reviews", 
+  ylab= "Emotion Values"
+)
+
+plot(
+  syuzhet_vector[1:50], 
+  type="l", 
+  main="syuzhet vector Plot Trajectory", 
+  xlab = "Reviews", 
+  ylab= "Emotion Values"
+)
+
+```
+
+
+
+
+```{r}
+
+ft_values <- get_dct_transform(
+  syuzhet_vector[1:50], 
+  low_pass_size = 3, 
+  x_reverse_len = 5000,
+  scale_vals = T,
+  scale_range = F
+)
+plot(
+  ft_values, 
+  type ="l", 
+  main ="Amazon Reviews using Transformed Values", 
+  xlab = "Reviews", 
+  ylab = "Emotional score", 
+  col = "red"
+)
+
+
+```
+
+# Application of Naive bayes theorem for classification of reviews.
+
+```{r}
+set.seed(3000)
+
+index <- sample(1:nrow(df_syuzhet_reviews),size=.7*nrow(df_syuzhet_reviews))
+
+train_set_syu <- df_syuzhet_reviews[index, ]
+test_set_syu  <- df_syuzhet_reviews[-index, ]
+
+# check the proportion of class variable
+prop.table(table(train_set_syu$Sentiment_Score))
+
+prop.table(table(test_set_syu$Sentiment_Score))
+
+
+train_corpus <- VCorpus(VectorSource(train_set_syu$Reviews))
+test_corpus <- VCorpus(VectorSource(test_set_syu$Reviews))
+```
+
+#WordCloud Visualization
+
+```{r}
+# subset the training data into groups
+
+positive <- subset(train_set_syu, Sentiment_Score == 1)
+negative  <- subset(train_set_syu,Sentiment_Score == -1)
+neutral <- subset(train_set_syu, Sentiment_Score == 0)
+
+```
+
+
+# Wordcloud of Positive words with Minimum Frequency of occurrence altleast 40 times.
+
+```{r}
+
+wordcloud(positive$Reviews,min.freq = 40, max.words = 60, scale = c(3, 0.5),random.order = T,colors = brewer.pal(8,"Dark2"))
+
+```
+
+
+# Wordcloud of Negative words with Minimum Frequency of occurrence altleast 40 times.
+
+```{r}
+
+wordcloud(negative$Reviews, min.freq = 40, max.words = 60, scale = c(3, 0.5),random.order = T,colors = brewer.pal(8,"Dark2"))
+
+```
+
+
+# Wordcloud of words with Neutral sentiment with Minimum Frequency of occurrence altleast 40 times.
+
+```{r}
+
+wordcloud(neutral$Reviews,min.freq = 40, max.words = 60, scale = c(3, 0.5),random.order = T,colors = brewer.pal(8,"Dark2"))
+
+```
+#The typical words for a negative review are there: “worst”, “bad”, “disappointed”. But words like “food” and “service” appear often in both classes.
+
+# create a document-term sparse matrix directly for train and test
+
+```{r}
+train_doc_matrix<- DocumentTermMatrix(train_corpus)
+
+test_doc_matrix <- DocumentTermMatrix(test_corpus)
+
+
+# create function to convert counts to a factor
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, "1", "0")
+}
+
+# apply() convert_counts() to columns of train/test data
+train_binary <- apply(train_doc_matrix, MARGIN = 2, convert_counts)
+test_binary  <- apply(test_doc_matrix, MARGIN = 2, convert_counts)
+```
+
+
+#Step 3: Training a model on the data
+
+```{r}
+
+classifier <- naiveBayes(as.matrix(train_binary), train_set_syu$Sentiment_Score)
+
+# Evaluating model performance
+test_prediction <- predict(classifier, as.matrix(test_binary))
+```
+
+```{r}
+
+CrossTable(test_prediction, test_set_syu$Sentiment_Score,
+           prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+           dnn = c('predicted', 'actual'))
+```
+
+# Confussion Matrix
+
+```{r}
+
+test_set_syu$Sentiment_Score<- as.factor(test_set_syu$Sentiment_Score)
+
+confusionMatrix(test_prediction,test_set_syu$Sentiment_Score,mode = "everything")
+
+```
+
+
+##  finding sentiment using "bing" where the scale varies from (-1 to 1)
+
+```{r}
+
+bing_vector<- get_sentiment(selected_dataset$Reviews,method = "bing")
+head(bing_vector)
+summary(bing_vector)
+
+```
+
+# signing scores to bing vector of 1,-1 and 0 as postive ,negative and neutral
+
+```{r}
+bing_sentiment_score<- sign(bing_vector)
+View(bing_sentiment_score)
+```
+
+
+
+### VISUALS FOR BING VECTOR SENTIMENT
+
+```{r}
+plot(
+  bing_vector[1:50], 
+  type="h", 
+  main="Bing vector Plot Trajectory", 
+  xlab = "Reviews", 
+  ylab= "Emotions Values"
+)
+
+plot(
+  bing_vector[1:50], 
+  type="l", 
+  main="Bing vector Plot Trajectory", 
+  xlab = "Reviews", 
+  ylab= "Emotions Values"
+)
+
+bing_ft_values <- get_dct_transform(
+  bing_vector[1:50], 
+  low_pass_size = 3, 
+  x_reverse_len = 5000,
+  scale_vals = TRUE,
+  scale_range = FALSE
+)
+plot(
+  bing_ft_values, 
+  type ="l", 
+  main ="Amazon Reviews using Transformed Values", 
+  xlab = "Reviews", 
+  ylab = "Emotion score", 
+  col = "red"
+)
+```
+
+# Building data frame having bing vector sentiments and customer reviews
+```{r}
+
+bing_dataset<- data.frame(Reviews= selected_dataset$Reviews,Ratings=selected_dataset$Ratings, bing_sentiment_score)
+View(bing_dataset)
+
+
+```
+
+#Building Naive bayes classifier for bing vector
+```{r}
+
+set.seed(3001)
+
+index_bing <- sample(1:nrow(bing_dataset),size=.7*nrow(bing_dataset))
+
+train_set_bing <- bing_dataset[index_bing, ]
+test_set_bing  <- bing_dataset[-index_bing, ]
+
+nrow(train_set_bing)
+nrow(test_set_bing)
+```
+
+# check the proportion of class variable
+
+```{r}
+
+prop.table(table(train_set_bing$bing_sentiment_score))
+
+prop.table(table(test_set_bing$bing_sentiment_score))
+
+```
+```{r}
+
+train_corpus_bing <- VCorpus(VectorSource(train_set_bing$Reviews))
+test_corpus_bing <- VCorpus(VectorSource(test_set_bing$Reviews))
+
+train_doc_matrix_bing<- DocumentTermMatrix(train_corpus_bing)
+
+test_doc_matrix_bing <- DocumentTermMatrix(test_corpus_bing)
+
+
+# create function to convert counts to a factor
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, "1", "0")
+}
+
+# apply() convert_counts() to columns of train/test data
+train_binary_bing <- apply(train_doc_matrix_bing, MARGIN = 2, convert_counts)
+test_binary_bing  <- apply(test_doc_matrix_bing, MARGIN = 2, convert_counts)
+
+
+
+```
+# training the naive bayes classifier for bing vector
+
+```{r}
+
+# Training a model on the data
+classifier_bing <- naiveBayes(as.matrix(train_binary_bing), train_set_bing$bing_sentiment_score)
+
+# Evaluating model performance
+test_prediction_bing <- predict(classifier_bing, as.matrix(test_binary_bing))
+class(test_prediction_bing)
+
+
+CrossTable(test_prediction_bing, test_set_bing$bing_sentiment_score,
+           prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+           dnn = c('predicted', 'actual'))
+```
+
+#Confusion Matrix of bing vector sentiments
+
+```{r}
+
+test_set_bing$bing_sentiment_score <- as.factor(test_set_bing$bing_sentiment_score)
+confusionMatrix(test_prediction_bing,test_set_bing$bing_sentiment_score,mode = "everything")
+
+```
+
+##AFINN VECTOR
+
+```{r}
+
+## finding the sentiment using "afinn" where the scale varies from (-5 to 5)
+afinn_vector<- get_sentiment(selected_dataset$Reviews,method = "afinn")
+head(afinn_vector[1:20])
+summary(afinn_vector)
+afinn_sentiment_score<- sign(afinn_vector)
+
+## VISUALS FOR AFINN VECTOR SENTIMENTS
+
+plot(
+  afinn_vector[1:50], 
+  type="h", 
+  main="Afinn vector Plot Trajectory", 
+  xlab = "Reviews", 
+  ylab= "Emotional Values"
+)
+
+plot(
+  afinn_vector[1:50], 
+  type="l", 
+  main="Afinn vector Plot Trajectory", 
+  xlab = "Reviews", 
+  ylab= "Emotional Values"
+)
+
+afinn_ft_values <- get_dct_transform(
+  afinn_vector[1:50], 
+  low_pass_size = 3, 
+  x_reverse_len = 5000,
+  scale_vals = TRUE,
+  scale_range = FALSE
+)
+plot(
+  afinn_ft_values, 
+  type ="l", 
+  main ="Amazon Reviews using Transformed Values", 
+  xlab = "Reviews", 
+  ylab = "Emotional score", 
+  col = "red"
+)
+
+```
+
+# Creating the dataset with afinn vector sentiment values along with Reviews and Ratings
+```{r}
+
+afinn_dataset<- data.frame(Reviews= selected_dataset$Reviews,Ratings= selected_dataset$Ratings,Afinn_sentiment_score=afinn_sentiment_score)
+View(afinn_dataset)
+
+```
+# NAIVE BAYES CLASSIFICATION FOR AFINN VECTOR SENTIMENT VALUES
+
+```{R}
+
+
+
+set.seed(3003)
+
+index_afinn<- sample(1:nrow(afinn_dataset),size=.7*nrow(afinn_dataset))
+
+train_set_afinn <- afinn_dataset[index_afinn, ]
+test_set_afinn  <- afinn_dataset[-index_afinn, ]
+
+nrow(train_set_bing)
+nrow(test_set_bing)
+```
+
+# check the proportion of class variable
+
+```{r}
+
+prop.table(table(train_set_afinn$Afinn_sentiment_score))
+
+prop.table(table(test_set_afinn$Afinn_sentiment_score))
+
+```
+```{r}
+
+train_corpus_afinn<- VCorpus(VectorSource(train_set_afinn$Reviews))
+test_corpus_afinn <- VCorpus(VectorSource(test_set_afinn$Reviews))
+
+train_doc_matrix_afinn<- DocumentTermMatrix(train_corpus_afinn)
+
+test_doc_matrix_afinn <- DocumentTermMatrix(test_corpus_afinn)
+
+
+# create function to convert counts to a factor
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, "1", "0")
+}
+
+# apply() convert_counts() to columns of train/test data
+train_binary_afinn <- apply(train_doc_matrix_afinn, MARGIN = 2, convert_counts)
+test_binary_afinn  <- apply(test_doc_matrix_afinn, MARGIN = 2, convert_counts)
+
+
+
+```
+# training the naive bayes classifier for Afinn vector
+
+```{r}
+
+# Training a model on the data
+classifier_afinn <- naiveBayes(as.matrix(train_binary_afinn), train_set_afinn$Afinn_sentiment_score)
+
+# Evaluating model performance
+test_prediction_afinn <- predict(classifier_afinn, as.matrix(test_binary_afinn))
+class(test_prediction_bing)
+
+
+CrossTable(test_prediction_afinn, test_set_afinn$Afinn_sentiment_score,
+           prop.chisq = FALSE, prop.t = FALSE, prop.r = FALSE,
+           dnn = c('predicted', 'actual'))
+```
+
+#Confusion Matrix of bing vector sentiments
+
+```{r}
+
+test_set_afinn$Afinn_sentiment_score <- as.factor(test_set_afinn$Afinn_sentiment_score)
+confusionMatrix(test_prediction_afinn,test_set_afinn$Afinn_sentiment_score,mode = "everything" )
+
+
+
+```
+
+# Emotions Visualizations
+
+```{r}
+emotions<- get_nrc_sentiment(selected_dataset$Reviews)
+View(emotions)
+sum_emotions_bycol<- colSums(emotions)
+View(sum_emotions_bycol)
+df_emotions<- data.frame(count=sum_emotions_bycol,emotion=names(sum_emotions_bycol))
+View(df_emotions)
+```
+
+
+#plotting the overall emotions of the dataset
+
+```{r}
+
+ggplot(df_emotions,aes(x=reorder(emotion,-count),y=count))+geom_bar(stat = "identity")
+
+```
+
+
+

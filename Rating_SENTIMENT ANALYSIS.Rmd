@@ -1,0 +1,303 @@
+---
+title: "SENTIMENT ANALYSIS OF AMAZON REVIEWS WITH RESPECT TO RATINGS TAKEN AS SENTIMENT USING NAIVE-BAYES"
+author: "HARJOT SARWARA"
+date: '2022-03-26'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+# Loading the libraries required to explore the dataset
+
+```{r}
+
+library(tm)
+library(wordcloud)
+library(SnowballC)
+library(dplyr)
+library(syuzhet)
+library(caret)
+library(e1071)
+library(stringr)
+library(ggplot2)
+library(car)
+library(psych)
+library(corpus)
+library(knitr)
+library(gmodels)
+
+
+```
+
+
+
+#Loading the dataset from url link: "https://data.world/datafiniti/consumer-reviews-of-amazon-products/workspace/file?filename=Datafiniti_Amazon_Consumer_Reviews_of_Amazon_Products.csv"
+
+```{r}
+
+Amazon_dataset<- read.csv("C:\\Users\\harjo\\Documents\\project\\Data_amz.csv",sep = ",",header = T)
+
+```
+
+#Insepecting the structure of the dataset to check the data types of all the attributes using the "str" command:
+
+```{r}
+
+head(str(Amazon_dataset))
+
+```
+
+# Changing the data type of Reviews.text column from factor to character as it is containing the textual data only.
+
+```{r}
+Amazon_dataset$reviews.text<- as.character(Amazon_dataset$reviews.text)
+class(Amazon_dataset$reviews.text)
+
+```
+
+
+## checking for NA values in the dataset in the Reviews.text column and Rating column
+
+```{r}
+
+which(is.na(Amazon_dataset$reviews.text))
+which(is.na(Amazon_dataset$reviews.rating))
+
+```
+
+# Selecting columns for analysis to elimnate other columns which are not contributing towards the sentiments like ID, dateadded, dateupdated,asins,brand,imageURLS etc, but keeping the Reviews.Ratings and Reviews.texts to start analysing the sentiments hidden in the text of the Reviews.
+
+```{r}
+selected_dataset<- data.frame(Amazon_dataset$reviews.text,Amazon_dataset$reviews.rating)
+names(selected_dataset)[1]<- paste("Reviews")
+names(selected_dataset)[2]<- paste("Ratings")
+View(selected_dataset)
+class(selected_dataset$Reviews)
+class(selected_dataset$Ratings)
+Dataset_RR<- data.frame(Reviews=selected_dataset$Reviews,Ratings= selected_dataset$Ratings)
+```
+
+#Converting the reviews in corpus to start preprocessing the data which includes removal of numbers,stopwords,whitespace, punctuations,making the font to lower through out and doing the stemming and completing the stemmed words to have the better understanding for extracting the better meaning for Sentiment analysis.
+
+```{r}
+
+selected_dataset$Reviews<- iconv(selected_dataset$Reviews,from = "utf-8", to="ASCII//TRANSLIT")
+selected_dataset$Reviews<- gsub("[^0-9A-Za-z///' ]","" , selected_dataset$Reviews,ignore.case = TRUE)
+gsub("fianc","fiance'",selected_dataset$Reviews, ignore.case = T)
+```
+# Text corpus
+```{r}
+Text.corpus<- Corpus(VectorSource(selected_dataset$Reviews))
+
+```
+
+# Removing punctuation
+```{r}
+Text.corpus<- tm_map(Text.corpus,removePunctuation)
+```
+# Coverting to lower case
+```{r}
+Text.corpus<- tm_map(Text.corpus,content_transformer(tolower))
+```
+# Stopwords
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "en"))
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "smart"))
+```
+
+# Removing the specific words
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeWords,c("kindle","amazon","tablet","echo","alexa","fire","ive","im") )
+```
+
+# Removing numbers as numbers do not have any sentiment
+
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeNumbers)
+```
+
+# Removing the extra whitespace
+```{r}
+Text.corpus<- tm_map(Text.corpus,stripWhitespace)
+
+Dataset_RR$Reviews<- sapply(Text.corpus,paste,collapse="")
+```
+
+# Conversion of Rating to standard values, like rating (5,4=1 or Positive),rating (3= 0 or Neural) and ratings (2,1 = -1, or Negative)
+```{r}
+
+conv_ratings<- str_replace_all(Dataset_RR$Ratings,c("1"="-1","2"="-1","3"="0","4"="1","5"="1"))
+View(as.data.frame(conv_ratings))
+
+# Extracting sentiments using syuzhet vector from reviews,scale of syuzhet vector 
+
+syuzhet_vector<- get_sentiment(selected_dataset$Reviews,method = "syuzhet")
+
+head(syuzhet_vector)
+summary(syuzhet_vector)
+View(syuzhet_vector)
+
+```
+# signing the standardised values of 1 to each positive value ,-1 to negative value and 0 remains zero
+
+```{r}
+syuzhet_sentiment_score<- sign(syuzhet_vector)
+View(syuzhet_sentiment_score)
+Dataset_RR<- cbind(Dataset_RR,conv_ratings,syuzhet_sentiment_score)
+View(Dataset_RR)
+```
+# Doing the comparison of the converted ratings in the form of 1,0,-1 with the syuzhet sentiment scores inoder to find the polarity of the rating's sentiment (conv_ratings) and the syuzhet sentiment scores
+```{r}
+
+comparison_results<- ifelse(Dataset_RR$conv_ratings==Dataset_RR$syuzhet_sentiment_score,"Yes","No")
+
+prop.table(table(comparison_results))
+
+table(comparison_results)
+table(Dataset_RR$Ratings)
+
+View(Dataset_RR)
+
+
+
+
+
+```
+# naive bayes
+
+```{r}
+library(tm)
+set.seed(4000)
+index_ratings<- sample(1:nrow(Dataset_RR),size=.7*nrow(Dataset_RR))
+
+train_set_ratings <- Dataset_RR[index_ratings, ]
+test_set_ratings <- Dataset_RR[-index_ratings, ]
+
+# check the proportion of class variable
+prop.table(table(train_set_ratings$conv_ratings))
+
+prop.table(table(test_set_ratings$conv_ratings))
+
+
+train_corpus_ratings <- VCorpus(VectorSource(train_set_ratings$Reviews))
+test_corpus_ratings <- VCorpus(VectorSource(test_set_ratings$Reviews))
+
+train_doc_matrix_ratings<- DocumentTermMatrix(train_corpus_ratings)
+test_doc_matrix_ratings <- DocumentTermMatrix(test_corpus_ratings)
+
+
+# create function to convert counts to a factor
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, "1", "0")
+}
+
+# apply() convert_counts() to columns of train/test data
+train_binary_ratings <- apply(train_doc_matrix_ratings, MARGIN = 2, convert_counts)
+test_binary_ratings <- apply(test_doc_matrix_ratings, MARGIN = 2, convert_counts)
+```
+
+
+#Step 3: Training a model on the data
+
+```{r}
+
+# Training a model on the data
+classifier_ratings<- naiveBayes(as.matrix(train_binary_ratings), train_set_ratings$conv_ratings)
+
+# Evaluating model performance
+test_prediction_ratings <- predict(classifier_ratings, as.matrix(test_binary_ratings))
+class(test_prediction_ratings)
+
+Dataset_RR$conv_ratings<- as.factor(Dataset_RR$conv_ratings)
+
+test_set_ratings$conv_ratings<- as.factor(test_set_ratings$conv_ratings)
+class(test_prediction_ratings)
+class(train_set_ratings$conv_ratings)
+train_set_ratings$conv_ratings<- as.factor(train_set_ratings$conv_ratings)
+levels(train_set_ratings$conv_ratings)
+nrow(test_set_ratings)
+str(train_set_ratings)
+```
+
+# Confusion Matrix and cross table
+
+```{r}
+confusionMatrix(test_prediction_ratings,test_set_ratings$conv_ratings,dnn = c("Predict", "Actual"),mode = "everything")
+
+CrossTable(test_prediction_ratings,test_set_ratings$conv_ratings,dnn = c("Predict", "Actual"),mode = "everything",prop.r = F,prop.c = F,prop.chisq = F )
+
+
+
+```
+
+
+```{r}
+
+set.seed(4001)
+index_ratings<- sample(1:nrow(Dataset_RR),size=.5*nrow(Dataset_RR))
+
+train_set_ratings <- Dataset_RR[index_ratings, ]
+test_set_ratings <- Dataset_RR[-index_ratings, ]
+
+# check the proportion of class variable
+prop.table(table(train_set_ratings$conv_ratings))
+
+prop.table(table(test_set_ratings$conv_ratings))
+
+
+train_corpus_ratings <- VCorpus(VectorSource(train_set_ratings$Reviews))
+test_corpus_ratings <- VCorpus(VectorSource(test_set_ratings$Reviews))
+
+train_doc_matrix_ratings<- DocumentTermMatrix(train_corpus_ratings)
+test_doc_matrix_ratings <- DocumentTermMatrix(test_corpus_ratings)
+
+
+# create function to convert counts to a factor
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, "1", "0")
+}
+
+# apply() convert_counts() to columns of train/test data
+train_binary_ratings <- apply(train_doc_matrix_ratings, MARGIN = 2, convert_counts)
+test_binary_ratings <- apply(test_doc_matrix_ratings, MARGIN = 2, convert_counts)
+```
+
+
+#Step 3: Training a model on the data
+
+```{r}
+
+# Training a model on the data
+classifier_ratings<- naiveBayes(as.matrix(train_binary_ratings), train_set_ratings$conv_ratings)
+
+# Evaluating model performance
+test_prediction_ratings <- predict(classifier_ratings, as.matrix(test_binary_ratings))
+class(test_prediction_ratings)
+
+
+# confussion Matrix to check the correct and incorrect prediction using the naivebayes model classifier for test set.
+
+confusionMatrix(test_prediction_ratings,test_set_ratings$conv_ratings,dnn = c("Predict", "Actual"),mode = "everything")
+
+```
+
+#Crosstable to explore the of naivebayes model
+
+```{r}
+
+CrossTable(test_prediction_ratings,test_set_ratings$conv_ratings,dnn = c("Predict", "Actual"),prop.c = F,prop.chisq = F,prop.t = F, prop.r = F)
+
+
+```
+
+
+
+SENTIMENT ANALYSIS OF AMAZON REVIEWS WITH RESPECT TO RATINGS TAKEN AS SENTIMENT.

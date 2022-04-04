@@ -1,0 +1,254 @@
+---
+title: "SVM MODEL FOR BING SENTIMENT SCORE"
+author: "HARJOT SARWARA"
+date: '2022-04-01'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+# Loading the libraries required for svm
+
+```{r}
+
+library(tm)
+library(wordcloud)
+library(SnowballC)
+library(dplyr)
+library(syuzhet)
+library(caret)
+library(e1071)
+library(stringr)
+library(ggplot2)
+library(car)
+library(psych)
+library(corpus)
+library(knitr)
+library(rmarkdown)
+library(gmodels)
+
+
+```
+
+
+
+
+#Loading the dataset from url link: "https://data.world/datafiniti/consumer-reviews-of-amazon-products/workspace/file?filename=Datafiniti_Amazon_Consumer_Reviews_of_Amazon_Products.csv"
+
+```{r}
+
+Amazon_dataset<- read.csv("C:\\Users\\harjo\\Documents\\project\\Data_amz.csv",sep = ",",header = T)
+BING_svm_selected_dataset<- data.frame(Reviews= Amazon_dataset$reviews.text)
+```
+
+# converting the Reviews to character data type
+
+```{r}
+BING_svm_selected_dataset$Reviews<- as.character(BING_svm_selected_dataset$Reviews)
+
+
+```
+
+# Cleaning the reviews, Removing the special characters available in the reviews like the alpanumeric , latin1 format and utf8 format words to ASCII before further cleaning using the "tm" library.
+
+```{r}
+
+iconv(BING_svm_selected_dataset$Reviews,from = "utf-8", to ="ASCII//TRANSLIT")
+BING_svm_selected_dataset$Reviews<- gsub("[^0-9A-Za-z///' ]","" , BING_svm_selected_dataset$Reviews,ignore.case = TRUE)
+gsub("fianc","fiance'",BING_svm_selected_dataset$Reviews, ignore.case = T)
+Text.corpus<- Corpus(VectorSource(BING_svm_selected_dataset$Reviews))
+
+
+
+```
+
+# Removing Punctuation
+```{r}
+Text.corpus<- tm_map(Text.corpus,removePunctuation)
+```
+# Coverting to lower case
+```{r}
+Text.corpus<- tm_map(Text.corpus,content_transformer(tolower))
+```
+# Stopwords
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "en"))
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "smart"))
+```
+# Removing the specific words
+```{r}
+
+Text.corpus<- tm_map(Text.corpus,removeWords,c("kindle","amazon","tablet","echo","alexa","fire","im","hes","hasnt") )
+
+```
+
+# Removing numbers as numbers do not have any sentiment
+
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeNumbers)
+
+```
+
+# Striping the whitespace
+```{r}
+
+Text.corpus<- tm_map(Text.corpus,stripWhitespace)
+
+BING_svm_selected_dataset$Reviews<- sapply(Text.corpus,paste,collapse="")
+
+```
+
+# Building the bing vector of sentiment scores and converting it in the form of "1","0","-1"
+
+
+```{r}
+bing_vector<- get_sentiment(BING_svm_selected_dataset$Reviews,method = "bing")
+
+bing_sentiment_score<- sign(bing_vector)
+
+
+```
+
+# Appending the dataset by adding the column of sentiment derived from bing vector and bing sentiment score.
+
+```{r}
+
+BING_svm_selected_dataset<- data.frame(Reviews=BING_svm_selected_dataset$Reviews,Sentiment = bing_sentiment_score)
+
+View(BING_svm_selected_dataset)
+
+
+
+```
+
+# Converting the bing sentiments values from "0" to "-1" and again converting the "-1" score to "0".Making binary form of sentiments such as "1" is assumed to be Positive and "0" is assumed to be negative
+
+
+```{r}
+
+BING_svm_selected_dataset$Sentiment<- str_replace_all(BING_svm_selected_dataset$Sentiment,"0","-1")
+
+BING_svm_selected_dataset$Sentiment<- str_replace_all(BING_svm_selected_dataset$Sentiment,"-1","0")
+
+BING_svm_selected_dataset$Sentiment<- as.factor(BING_svm_selected_dataset$Sentiment)
+levels(BING_svm_selected_dataset$Sentiment)
+
+```
+
+# creating Document Term Matrix of the clean corpus
+```{r}
+BING_dtm_svm<- DocumentTermMatrix(Text.corpus)
+
+```
+
+```{r}
+BING_features_svm_dataset<- findFreqTerms(BING_dtm_svm,10)
+summary(BING_features_svm_dataset)
+head(BING_features_svm_dataset)
+
+
+```
+
+```{r}
+
+BING_dtm2_svm <- DocumentTermMatrix(Text.corpus, list(global = c(2, Inf),
+                                         dictionary = BING_features_svm_dataset))
+
+
+```
+
+
+```{r}
+
+set.seed(7001)
+BING_train_index <- createDataPartition(BING_svm_selected_dataset$Sentiment, p=0.75, list=FALSE)
+# RAW DATA SETS TRAIN AND TEST
+
+BING_Train_orig_data<- BING_svm_selected_dataset[BING_train_index,]
+BING_Test_orig_data<- BING_svm_selected_dataset[-BING_train_index,]
+
+# set for the cleaned-up data
+BING_train_two <- Text.corpus[BING_train_index]
+BING_test_two<- Text.corpus[-BING_train_index]
+
+
+# Creating dictionary for reference 
+
+BING_dict <- findFreqTerms(BING_dtm2_svm, lowfreq=10)
+
+BING_svm_train <- DocumentTermMatrix(BING_train_two, list(dictionary=BING_dict))
+BING_svm_test <- DocumentTermMatrix(BING_test_two, list(dictionary=BING_dict))
+
+# this step further converts the DTM-shaped data into a categorical form for modeling
+convert_counts <- function(x) {
+    x <- ifelse(x > 0, 1, 0)
+    # x <- factor(x, levels = c(0, 1), labels = c("Negative", "Positive"))
+}
+
+BING_svm_train <- apply(BING_svm_train,MARGIN=2, FUN=convert_counts)
+BING_svm_test <- apply(BING_svm_test,MARGIN=2, FUN=convert_counts)
+
+BING_svm_train <- as.data.frame(BING_svm_train)
+BING_svm_test <- as.data.frame(BING_svm_test)
+
+str(BING_svm_train)
+
+
+```
+
+# TRAIN A SUPPORT VECTOR MACHINE
+
+```{R}
+
+# preperation of the data
+BING_svm_train1 <- cbind(sentiment=factor(BING_Train_orig_data$Sentiment), BING_svm_train)
+BING_svm_test1 <- cbind(sentiment=factor(BING_Test_orig_data$Sentiment), BING_svm_test)
+
+BING_svm_train1<-as.data.frame(BING_svm_train1)
+BING_svm_test1<-as.data.frame(BING_svm_test1)
+
+str(BING_svm_train1)
+
+BING_svm_model<- svm(sentiment ~ ., data = BING_svm_train1)
+
+BING_svm_model
+
+```
+# Predictions using the svm model
+
+```{r}
+
+BING_Prediction_svm_model<- predict(BING_svm_model,na.omit(BING_svm_test1))
+
+BING_confusion_mat_svm <- confusionMatrix(BING_Prediction_svm_model, BING_svm_test1$sentiment,dnn = c("Prediction","Actual"),mode = "everything")
+
+BING_confusion_mat_svm
+
+summary(BING_svm_model)
+
+table(BING_svm_test1$sentiment)
+
+
+
+```
+
+# CrossTable
+
+```{r}
+
+CrossTable(BING_Prediction_svm_model, BING_svm_test1$sentiment,dnn = c("Prediction","Actual"),chisq = F,prop.r = F,prop.c = F,prop.t = F)
+
+
+```
+
+
+
+BING SVM MODEL

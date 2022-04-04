@@ -1,0 +1,251 @@
+---
+title: "SENTIMENT ANALYSIS USING SVM"
+author: "HARJOT SARWARA"
+date: '2022-03-31'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+
+# loading the libraries required
+
+```{R}
+
+library(corpus)
+library(text2vec)
+library(ggplot2)
+library(tm)
+library(wordcloud)
+library(SnowballC)
+library(dplyr)
+library(syuzhet)
+library(caret)
+library(e1071)
+library(stringr)
+library(car)
+library(psych)
+library(knitr)
+library(gmodels)
+
+```
+
+#Loading the dataset from url link: "https://data.world/datafiniti/consumer-reviews-of-amazon-products/workspace/file?filename=Datafiniti_Amazon_Consumer_Reviews_of_Amazon_Products.csv"
+
+```{R}
+
+Amazon_dataset<- read.csv("C:\\Users\\harjo\\Documents\\project\\Data_amz.csv",sep = ",",header = T)
+svm_selected_dataset<- data.frame(Reviews= Amazon_dataset$reviews.text)
+
+```
+
+
+```{r}
+svm_selected_dataset$Reviews<- as.character(svm_selected_dataset$Reviews)
+
+```
+
+```{r}
+
+iconv(svm_selected_dataset$Reviews,from = "utf-8", to ="ASCII//TRANSLIT")
+svm_selected_dataset$Reviews<- gsub("[^0-9A-Za-z///' ]","" , svm_selected_dataset$Reviews,ignore.case = TRUE)
+gsub("fianc","fiance'",svm_selected_dataset$Reviews, ignore.case = T)
+Text.corpus<- Corpus(VectorSource(svm_selected_dataset$Reviews))
+
+
+
+```
+
+# Removing Punctuation
+```{r}
+Text.corpus<- tm_map(Text.corpus,removePunctuation)
+```
+# Coverting to lower case
+```{r}
+Text.corpus<- tm_map(Text.corpus,content_transformer(tolower))
+```
+# Stopwords
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "en"))
+Text.corpus<- tm_map(Text.corpus,removeWords,stopwords(kind = "smart"))
+```
+# Removing the specific words
+```{r}
+
+Text.corpus<- tm_map(Text.corpus,removeWords,c("kindle","amazon","tablet","echo","alexa","fire","im","hes","hasnt") )
+
+```
+
+# Removing numbers as numbers do not have any sentiment
+
+```{r}
+Text.corpus<- tm_map(Text.corpus,removeNumbers)
+
+```
+
+# strip whitespace
+```{r}
+
+Text.corpus<- tm_map(Text.corpus,stripWhitespace)
+
+svm_selected_dataset$Reviews<- sapply(Text.corpus,paste,collapse="")
+
+```
+# Extracting sentiments using syuzhet vector from reviews,scale of syuzhet vector 
+
+```{r}
+
+syuzhet_vector<- get_sentiment(svm_selected_dataset$Reviews,method = "syuzhet")
+
+head(syuzhet_vector)
+summary(syuzhet_vector)
+View(syuzhet_vector)
+
+```
+# signing the standardised values of 1 to each positive value ,-1 to negative value and 0 remains zero
+
+```{r}
+syuzhet_sentiment_score<- sign(syuzhet_vector)
+View(syuzhet_sentiment_score)
+
+```
+
+
+```{r}
+
+svm_selected_dataset<- data.frame(Reviews=svm_selected_dataset$Reviews,Sentiment = syuzhet_sentiment_score)
+
+View(svm_selected_dataset)
+
+
+```
+
+# Repalcing the "0" first to "-1"  and then replacing the "-1" to "0".Inorder to increase the negative sentiment taking all the syuzhet sentiment scores of zero value to negative and one value to positive to run the svm model
+```{r}
+
+svm_selected_dataset$Sentiment<- str_replace_all(svm_selected_dataset$Sentiment,"0","-1")
+svm_selected_dataset$Sentiment<- str_replace_all(svm_selected_dataset$Sentiment,"-1","0")
+View(svm_selected_dataset)
+
+svm_selected_dataset$Sentiment<- as.factor(svm_selected_dataset$Sentiment)
+levels(svm_selected_dataset$Sentiment)
+
+```
+
+
+# Creating dtm- Document term matrix
+```{r}
+
+dtm_svm<- DocumentTermMatrix(Text.corpus)
+
+```
+
+# finding the 10 most frequent terms considering as the features of the dataset
+
+```{r}
+features_svm_dataset<- findFreqTerms(dtm_svm,10)
+summary(features_svm_dataset)
+head(features_svm_dataset)
+
+
+```
+
+```{r}
+
+dtm2_svm <- DocumentTermMatrix(Text.corpus, list(global = c(2, Inf),
+                                         dictionary = features_svm_dataset))
+inspect(dtm2_svm)
+
+```
+
+
+
+# Preparing the dataset for SVM - SUPPORT VECTOR MACHINE
+
+```{r}
+
+set.seed(7000)
+train_index <- createDataPartition(svm_selected_dataset$Sentiment, p=0.75, list=FALSE)
+# RAW DATA SETS
+
+Train_orig_data<- svm_selected_dataset[train_index,]
+Test_orig_data<- svm_selected_dataset[-train_index,]
+
+# set for the cleaned-up data
+train_two <- Text.corpus[train_index]
+test_two<- Text.corpus[-train_index]
+
+
+
+dictionary_2 <- findFreqTerms(dtm2_svm, lowfreq=10)
+View(as.data.frame(dictionary_2))
+
+svm_train <- DocumentTermMatrix(train_two, list(dictionary=dictionary_2))
+svm_test <- DocumentTermMatrix(test_two, list(dictionary=dictionary_2))
+
+# this step further converts the DTM-shaped data into a categorical form for modeling with Naive Bayes
+convert_counts <- function(x) {
+    x <- ifelse(x > 0, 1, 0)
+    # x <- factor(x, levels = c(0, 1), labels = c("Negative", "Positive"))
+}
+
+svm_train <- apply(svm_train,MARGIN=2, FUN=convert_counts)
+svm_test <- apply(svm_test,MARGIN=2, FUN=convert_counts)
+
+svm_train <- as.data.frame(svm_train)
+svm_test <- as.data.frame(svm_test)
+
+str(svm_train)
+
+
+```
+
+# TRAIN A SUPPORT VECTOR MACHINE
+
+```{R}
+
+# preperation of the data
+svm_train1 <- cbind(sentiment=factor(Train_orig_data$Sentiment), svm_train)
+svm_test1 <- cbind(sentiment=factor(Test_orig_data$Sentiment), svm_test)
+
+svm_train1<-as.data.frame(svm_train1)
+svm_test1<-as.data.frame(svm_test1)
+
+str(svm_train1)
+
+svm_model<- svm(sentiment ~ ., data = svm_train1)
+
+svm_model
+
+```
+# Predictions using the svm model
+
+```{r}
+
+Prediction_svm_model<- predict(svm_model,na.omit(svm_test1))
+
+confusion_mat_svm <- confusionMatrix(Prediction_svm_model, svm_test1$sentiment,dnn = c("Prediction","Actual"),mode = "everything")
+
+confusion_mat_svm
+
+summary(svm_model)
+
+
+```
+
+```{r}
+CrossTable(Prediction_svm_model, svm_test1$sentiment,dnn = c("Prediction","Actual"),prop.r = F,prop.c = F,prop.t = F,prop.chisq = F)
+
+
+```
+
+Svm Algorithm
